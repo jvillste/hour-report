@@ -93,21 +93,26 @@
        vals))
 
 (comment
-  (do (->> (read-days)
-           (sort-by :date)
-           (map report-day)
-           (filter (fn [day] (.startsWith (:date day) "2020-04")))
-           (print-day-reports))
+  (let [month "2020-06"]
+    (do (->> (read-days)
+             (sort-by :date)
+             (map report-day)
+             (filter (fn [day] (.startsWith (:date day)
+                                            month)))
+             (print-day-reports))
 
-      (println "Totals:")
+        (println "Totals:")
 
-      (->> (read-days)
-           (sort-by :date)
-           (map report-day)
-           (filter (fn [day] (.startsWith (:date day) "2020-04")))
-           (combine-days)
-           (medley/map-vals (fn [task] (dissoc task :descriptions)))
-           (print-hours)))
+        (->> (read-days)
+             (sort-by :date)
+             (map report-day)
+             (filter (fn [day] (.startsWith (:date day)
+                                            month)))
+             (combine-days)
+             (medley/map-vals (fn [task] (dissoc task :descriptions)))
+             (print-hours))))
+
+
   (report-day (mapcat ))
 
 

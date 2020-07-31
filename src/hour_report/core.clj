@@ -75,8 +75,9 @@
 
 (defn print-day-reports [days]
   (doseq [day days]
-    (let [day-of-week (clj-time/day-of-week (format/parse (format/formatter "YYYY-MM-DD")
-                                                          (:date day)))]
+    (let [date (format/parse (format/formatter "YYYY-MM-dd")
+                             (:date day))
+          day-of-week (clj-time/day-of-week date)]
       (when (= 1 day-of-week)
         (println "\n-------------------\n"))
       (println (str ({1 "ma"
@@ -88,9 +89,9 @@
                       7 "su"}
                      day-of-week)
                     " "
-                    (:date day))))
-    (print-hours (:hours day))
-    ))
+                    (format/unparse (format/formatter "d.M")
+                                      date))))
+    (print-hours (:hours day))))
 
 (defn combine-days [days]
   (apply merge-with (fn [hours-1 hours-2]

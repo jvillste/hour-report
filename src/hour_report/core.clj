@@ -8,6 +8,7 @@
             [fungl.component.text-area :as text-area]
             [jsonista.core :as jsonista]
             [clj-time.core :as clj-time]
+            [clj-time.format :as format]
             [clojure.test :refer :all]
             [medley.core :as medley]
             [clojure.set :as set]))
@@ -70,11 +71,24 @@
                      task
                      (format-minutes total-minutes)
                      (apply str descriptions))))
-  (println (format "%20s %s" "Total: " (format-minutes (reduce + (map :total-minutes (vals hours)))))))
+  (println (format "%20s %s" "Total:" (format-minutes (reduce + (map :total-minutes (vals hours)))))))
 
 (defn print-day-reports [days]
   (doseq [day days]
-    (println (:date day))
+    (let [day-of-week (clj-time/day-of-week (format/parse (format/formatter "YYYY-MM-DD")
+                                                          (:date day)))]
+      (when (= 1 day-of-week)
+        (println "\n-------------------\n"))
+      (println (str ({1 "ma"
+                      2 "ti"
+                      3 "ke"
+                      4 "to"
+                      5 "pe"
+                      6 "la"
+                      7 "su"}
+                     day-of-week)
+                    " "
+                    (:date day))))
     (print-hours (:hours day))
     ))
 
@@ -86,14 +100,20 @@
                                                 (:descriptions hours-2))})
          (map :hours days)))
 
-(defn read-days []
-  (->> (jsonista/read-value (slurp "/Users/jukka/OneDrive/OneDrive - Nitor Group/backup.git/tunnit.hrt")
+(defn read-days-from-file [file-name]
+  (->> (jsonista/read-value (slurp file-name)
                             (jsonista/object-mapper {:decode-key-fn keyword}))
        :days
        vals))
 
+
+(defn read-days []
+  (concat (read-days-from-file "/Users/jukka/OneDrive/OneDrive - Nitor Group/backup.git/tunnit 9.1017.8.2018.hrt")
+          (read-days-from-file "/Users/jukka/OneDrive/OneDrive - Nitor Group/backup.git/tunnit.hrt 2019")
+          (read-days-from-file "/Users/jukka/OneDrive/OneDrive - Nitor Group/backup.git/tunnit.hrt")))
+
 (comment
-  (let [month "2020-06"]
+  (let [month "2020-07"]
     (do (->> (read-days)
              (sort-by :date)
              (map report-day)

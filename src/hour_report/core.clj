@@ -1,29 +1,16 @@
 (ns hour-report.core
-  (:require [clj-time.core :as clj-time]
-            [clj-time.format :as format]
-            [clojure.set :as set]
-            [clojure.test :refer :all]
-            [flow-gl.gui.visuals :as visuals]
-            [fungl.component.text-area :as text-area]
-            [fungl.layouts :as layouts]
-            [jsonista.core :as jsonista]
-            [medley.core :as medley]
-            [flow-gl.gui.animation :as animation]
-            [fungl.application :as application]
-            [flow-gl.graphics.font :as font]
-            [fungl.dependable-atom :as dependable-atom]
-            [clojure.core.async :as async]))
+  (:require
+   [clj-time.core :as clj-time]
+   [clj-time.format :as format]
+   [clojure.set :as set]
+   [clojure.string :as string]
+   [clojure.test :refer :all]
+   [hour-report.spreadsheet :as spreadsheet]
+   [jsonista.core :as jsonista]
+   [medley.core :as medley]))
 
-(def sample-day {:date {:year 2021 :month 4 :day 13}
-                 :end-time {:hour 16, :minute 52}
-                 :events
-                 [{:task-name "core"
-                   :description "dalin kehitystä"
-                   :start-time {:hour 5, :minute 20}
-                   :work? true}
-                  {:task-name "muuta"
-                   :start-time {:hour 7, :minute 0}
-                   :work? false}]})
+
+;;;;;;;; text report
 
 (defn format-minutes [minutes]
   (str (int (/ minutes 60))
@@ -37,15 +24,19 @@
                       hour
                       minute))
 
-(defn report-day [{:keys [events end-time date]}]
+
+
+(defn report-day [{log-lines :logLines
+                   end-time :endTime
+                   date :date}]
   {:date date
-   :hours (medley/map-vals (fn [events]
+   :hours (medley/map-vals (fn [log-lines]
                              {:total-minutes (reduce +
                                                      (map (comp clj-time/in-minutes :duration)
-                                                          events))
-                              :descriptions (into #{} (remove nil? (map :taskName2 events)))})
-                           (group-by :task-name
-                                     (filter :work?
+                                                          log-lines))
+                              :descriptions (into #{} (remove nil? (map :taskName2 log-lines)))})
+                           (group-by :taskName
+                                     (filter :isWork
                                              (map (fn [[line-1 line-2]]
                                                     (assoc line-1 :duration (if (clj-time/before? (:start-time line-1)
                                                                                                   (:start-time line-2))
@@ -54,28 +45,33 @@
                                                                               (clj-time/minutes 0))))
                                                   (partition 2 1
                                                              (conj (mapv (fn [log-line]
-                                                                           (let [hour-minute-start-time (:start-time log-line)]
+                                                                           (let [hour-minute-start-time (:startTime log-line)]
                                                                              (assoc log-line
                                                                                     :start-time
                                                                                     (clj-time/date-time 2020 1 1
                                                                                                         (:hour hour-minute-start-time)
                                                                                                         (:minute hour-minute-start-time)))))
-                                                                         events)
+                                                                         log-lines)
                                                                    {:start-time (clj-time/date-time 2020 1 1
                                                                                                     (:hour end-time)
                                                                                                     (:minute end-time))}))))))})
 
 (deftest test-report-day
-  (is (= {:date {:year 2021, :month 4, :day 13},
-          :hours {"core" {:total-minutes 100, :descriptions #{}}}}
-         (report-day sample-day))))
+  (is (= {"reititin" 26, "muuta" 572}
+         (report-day [{:startTime {:hour 8, :minute 30},
+                       :isWork true,
+                       :taskName "reititin"}
+                      {:startTime {:hour 8, :minute 56},
+                       :isWork false,
+                       :taskName "muuta"}]
+                     {:hour 18, :minute 28}))))
 
 (defn print-hours [hours]
   (doseq [[task {:keys [total-minutes descriptions]}] hours]
     (println (format "%20s %s %s"
                      task
                      (format-minutes total-minutes)
-                     (apply str descriptions))))
+                     (string/join ", " descriptions))))
   (println (format "%20s %s" "Total:" (format-minutes (reduce + (map :total-minutes (vals hours)))))))
 
 (defn print-day-reports [days]
@@ -97,7 +93,7 @@
                      day-of-week)
                     " "
                     (format/unparse (format/formatter "d.M")
-                                      date))))
+                                    date))))
     (print-hours (:hours day))))
 
 (defn combine-days [days]
@@ -118,32 +114,255 @@
        :days
        vals))
 
-
-(defn read-days []
-  (concat #_(read-days-from-file "/Users/jukka/OneDrive/OneDrive - Nitor Group/backup.git/tunnit 9.1017.8.2018.hrt")
-          #_(read-days-from-file "/Users/jukka/OneDrive/OneDrive - Nitor Group/backup.git/tunnit.hrt 2019")
-          #_(read-days-from-file "/Users/jukka/OneDrive/OneDrive - Nitor Group/backup.git/tunnit 2022.hrt")
-          (read-days-from-file "/Users/jukka/OneDrive/OneDrive - Nitor Group/backup.git/tunnit.hrt")
-          (:days (read-json "temp/tunnit-jullela-19.hrt"))))
-
-(defn print-report! [month]
-  (->> (read-days)
+(defn print-report! [days date-prefix]
+  (->> days
        (sort-by :date)
        (map report-day)
        (filter (fn [day] (.startsWith (:date day)
-                                      month)))
+                                      date-prefix)))
        (print-day-reports))
 
   (println "Totals:")
 
-  (->> (read-days)
+  (->> days
        (sort-by :date)
        (map report-day)
        (filter (fn [day] (.startsWith (:date day)
-                                      month)))
+                                      date-prefix)))
        (combine-days)
        (medley/map-vals (fn [task] (dissoc task :descriptions)))
        (print-hours)))
+
+
+;;;;;;;;  excel
+
+(defn hours-total [hours]
+  (reduce + (map :total-minutes (vals hours))))
+
+(defn round-to-half-hour [minutes]
+  (int (* (Math/round (float (/ minutes 30)))
+          30)))
+
+(deftest test-round-to-half-hour
+  (is (= 0
+         (round-to-half-hour 14)))
+
+  (is (= 30
+         (round-to-half-hour 15)))
+
+  (is (= 30
+         (round-to-half-hour 29)))
+
+  (is (= 30
+         (round-to-half-hour 30)))
+
+  (is (= 30
+         (round-to-half-hour 31)))
+
+  (is (= -30
+         (round-to-half-hour -31))))
+
+(defn round-hours [hours]
+  (medley/map-vals (fn [entry]
+                     (update entry :total-minutes round-to-half-hour))
+                   hours))
+
+(defn round-day-hours [day]
+  (update day
+          :hours
+          round-hours))
+
+(defn hours-difference [hours1 hours2]
+  (medley/map-kv-vals (fn [task summary]
+                        {:total-minutes (- (:total-minutes summary)
+                                           (:total-minutes (get hours2 task)))})
+                      hours1))
+
+(deftest test-hours-difference
+  (is (= {"work1" {:total-minutes 20}}
+         (hours-difference {"work1" {:total-minutes 1020, :descriptions #{}}}
+                           {"work1" {:total-minutes 1000, :descriptions #{}}}))))
+
+(defn hours-sum [hours1 hours2]
+  (merge (medley/map-kv-vals (fn [task summary]
+                               (-> summary
+                                   (update :total-minutes
+                                           (fn [total-minutes]
+                                             (+ total-minutes
+                                                (or (:total-minutes (get hours2 task))
+                                                    0))))
+                                   (update :descriptions
+                                           (partial set/union (:descriptions (get hours2 task))))))
+                             hours1)
+         (select-keys hours2
+                      (set/difference (set (keys hours2))
+                                      (set (keys hours1))))
+         (select-keys hours1
+                      (set/difference (set (keys hours1))
+                                      (set (keys hours2))))))
+
+(deftest test-hours-sum
+  (is (= {"work1" {:total-minutes 2020, :descriptions #{"foo" "bar"}}}
+         (hours-sum {"work1" {:total-minutes 1020, :descriptions #{"foo"}}}
+                    {"work1" {:total-minutes 1000, :descriptions #{"bar"}}})))
+
+  (is (= {"work1" {:total-minutes 20, :descriptions #{}}}
+         (hours-sum {"work1" {:total-minutes 1020, :descriptions #{}}}
+                    {"work1" {:total-minutes -1000, :descriptions #{}}})))
+
+  (is (= {"work1" {:total-minutes 2020, :descriptions #{}},
+          "work3" {:total-minutes 1000, :descriptions #{}},
+          "work2" {:total-minutes 1000, :descriptions #{}}}
+         (hours-sum {"work1" {:total-minutes 1020, :descriptions #{}}
+                     "work3" {:total-minutes 1000, :descriptions #{}}}
+                    {"work1" {:total-minutes 1000, :descriptions #{}}
+                     "work2" {:total-minutes 1000, :descriptions #{}}}))))
+
+(defn remove-smaller-magnitude [minimum-magnitude hours]
+  (medley/remove-vals #(>= minimum-magnitude (Math/abs (:total-minutes %)))
+                      hours))
+
+(deftest test-remove-smaller-magnitude
+  (is (= {"work2" {:total-minutes 10, :descriptions #{}},
+          "work3" {:total-minutes -10, :descriptions #{}}}
+         (remove-smaller-magnitude 5
+                                   {"work1" {:total-minutes 3, :descriptions #{}}
+                                    "work2" {:total-minutes 10, :descriptions #{}}
+                                    "work3" {:total-minutes -10, :descriptions #{}}}))))
+
+(defn remove-zero-minutes [hours]
+  (medley/remove-vals #(= 0 (:total-minutes %))
+                      hours))
+
+(deftest test-remove-zero-minutes
+  (is (= {"work2" {:total-minutes 1000, :descriptions #{}}}
+         (remove-zero-minutes {"work1" {:total-minutes 0, :descriptions #{}}
+                               "work2" {:total-minutes 1000, :descriptions #{}}}))))
+
+(defn day-report-for-compensation [task minutes day-reports]
+  (->> day-reports
+       (sort-by :date)
+       (reverse)
+       (medley/find-first (fn [day-report]
+                            (if (< 0 minutes)
+                              (contains? (:hours day-report)
+                                         task)
+                              (< 0
+                                 (+ minutes
+                                    (or (:total-minutes (get (:hours day-report)
+                                                             task))
+                                        0))))))))
+
+(deftest test-day-report-for-compensation
+  (is (= {:date "2022-08-02", :hours {"work1" {:total-minutes 130}}}
+         (day-report-for-compensation "work1"
+                                      30
+                                      [{:date "2022-08-01"
+                                        :hours {"work1" {:total-minutes 30}}}
+                                       {:date "2022-08-02"
+                                        :hours {"work1" {:total-minutes 130}}}])))
+
+  (is (= {:date "2022-08-02", :hours {"work1" {:total-minutes 130}}}
+         (day-report-for-compensation "work1"
+                                      -100
+                                      [{:date "2022-08-01"
+                                        :hours {"work1" {:total-minutes 30}}}
+                                       {:date "2022-08-02"
+                                        :hours {"work1" {:total-minutes 130}}}]))))
+
+(defn compensate [task minutes day-reports]
+  (let [day-reports-by-date (medley/index-by :date day-reports)
+        day-report-for-compensation (day-report-for-compensation task minutes day-reports)]
+    (assert (not (nil? day-report-for-compensation))
+            (str "could not find a day to compensate " minutes " for " task))
+    (println "compensating " minutes " minutes for " task " on " (:date day-report-for-compensation))
+    (vals (assoc day-reports-by-date
+                 (:date day-report-for-compensation)
+                 (update day-report-for-compensation
+                         :hours
+                         (partial hours-sum {task {:total-minutes minutes}}))))))
+
+(deftest test-compensate
+  (is (= '({:date "2022-07-31", :hours {"work0" {:total-minutes 130}}}
+           {:date "2022-08-01", :hours {"work1" {:total-minutes 30}}}
+           {:date "2022-08-02", :hours {"work1" {:total-minutes 30}}})
+         (compensate "work1"
+                     -100
+                     [{:date "2022-07-31"
+                       :hours {"work0" {:total-minutes 130}}}
+                      {:date "2022-08-01"
+                       :hours {"work1" {:total-minutes 30}}}
+                      {:date "2022-08-02"
+                       :hours {"work1" {:total-minutes 130}}}]))))
+
+(defn day-reports [days date-prefix]
+  (->> days
+       (filter (fn [day] (.startsWith (:date day)
+                                      date-prefix)))
+       (sort-by :date)
+       (map report-day)))
+
+(defn sort-tasks-by-hours [hours]
+  (map first (sort-by (fn [[_task entry]]
+                        (:total-minutes entry))
+                      hours)))
+
+(deftest test-sort-tasks-by-hours
+  (is (= '("work2" "work1")
+         (sort-tasks-by-hours {"work1" {:total-minutes 30}
+                                 "work2" {:total-minutes 20}}))))
+
+(defn rounded-day-reports [day-reports]
+  (let [rounded-day-reports (map round-day-hours
+                                 day-reports)
+        unrounded-totals (combine-days day-reports)
+        rounded-totals (combine-days rounded-day-reports)
+        compensation (round-hours (remove-smaller-magnitude 15
+                                                            (hours-difference unrounded-totals
+                                                                              rounded-totals)))
+        compensated-rounded-day-reports (sort-by :date
+                                                 (reduce (fn [day-reports [task entry]]
+                                                           (compensate task (:total-minutes entry) day-reports))
+                                                         rounded-day-reports
+                                                         compensation))
+        final-compensation (- (round-to-half-hour (hours-total (hours-difference (combine-days compensated-rounded-day-reports)
+                                                                                 unrounded-totals))))
+
+        final-day-reports (compensate (last (sort-tasks-by-hours unrounded-totals))
+                                      final-compensation
+                                      compensated-rounded-day-reports)
+
+        difference-after-compensation (remove-zero-minutes (hours-difference (combine-days final-day-reports)
+                                                                             unrounded-totals))]
+    {:difference-before-compensating (hours-difference (combine-days rounded-day-reports)
+                                                       (combine-days day-reports))
+     :compensation compensation
+     :final-compensation final-compensation
+     :rounded-day-reports final-day-reports
+     :difference-after-compensation difference-after-compensation
+     :total-difference-after-compensation (hours-total difference-after-compensation)}))
+
+(deftest test-rounded-day-reports
+  (is (= {:difference-before-compensating {"work1" {:total-minutes 16}, "work2" {:total-minutes 17}},
+          :compensation {"work1" {:total-minutes -30}, "work2" {:total-minutes -30}},
+          :final-compensation 30,
+          :rounded-day-reports ({:date "2022-08-01",
+                                 :hours
+                                 {"work1" {:total-minutes 90, :descriptions #{}},
+                                  "work2" {:total-minutes 90, :descriptions #{"comment"}}}}
+                                {:date "2022-08-02",
+                                 :hours
+                                 {"work1" {:total-minutes 90, :descriptions #{}},
+                                  "work2" {:total-minutes 60, :descriptions #{}}}}),
+          :difference-after-compensation {"work1" {:total-minutes 16}, "work2" {:total-minutes -13}},
+          :total-difference-after-compensation 3}
+
+         (rounded-day-reports [{:date "2022-08-01",
+                                :hours {"work1" {:total-minutes 89, :descriptions #{}},
+                                        "work2" {:total-minutes 88, :descriptions #{"comment"}}}}
+                               {:date "2022-08-02",
+                                :hours {"work1" {:total-minutes 75, :descriptions #{}},
+                                        "work2" {:total-minutes 75, :descriptions #{}}}}]))))
 
 (defn day-contains? [words day]
   (not (empty? (filter (fn [log-line]
@@ -153,313 +372,14 @@
                                words))
                        (:logLines day)))))
 
-(comment
-  (->> (read-days)
-       (filter (partial day-contains? ["jakeluhäiriö" "disruption"]))
-       (map report-day)
-       (combine-days)
-       (print-hours))
-
-  (print-day-reports (filter (fn [day]
-                               (not (empty? (filter (fn [log-line]
-                                                      (some (fn [query-word]
-                                                              (or (.contains (.toLowerCase (or (:taskName log-line) "")) query-word)
-                                                                  (.contains (.toLowerCase (or (:taskName2 log-line) "")) query-word)))
-                                                            ["jakeluhäi" "disrupt"]))
-                                                    (:logLines day)))))
-                             (read-days)))
-
-
-  (->> (read-days)
-       (sort-by :date)
-       (map report-day)
-       (filter (fn [day] (.startsWith (:date day)
-                                      month)))
-       (print-day-reports))
-  )
-
-
-
-;; UI
 
 (comment
-  (font/available-names)
+  (print-report! (read-days-from-file "temp/hours.hrt")
+                 "2022-08")
+
+  (spreadsheet/create-hours-spreadsheet "temp/template.xlsx"
+                                        "temp/out.xlsx"
+                                        {"Monthly Meetings" "monthly meeting"}
+                                        (:rounded-day-reports (rounded-day-reports (day-reports (read-days-from-file "temp/hours.hrt")
+                                                                                                "2022-08"))))
   )
-
-(def font-size 40)
-(def regular-font (font/create-by-name "CourierNewPSMT" font-size))
-(def bold-font (font/create-by-name "CourierNewPS-BoldMT" font-size))
-
-(defn text [string & [font]]
-  (text-area/text  (str string)
-                   [0 0 0 255]
-                   (or font
-                       regular-font)))
-
-(defn box [content & [{:keys [fill-color] :or {fill-color [255 255 255 255]}}]]
-  (layouts/box 10
-               (visuals/rectangle-2 :fill-color fill-color
-                                    :draw-color [200 200 200 255]
-                                    :line-width 4
-                                    :corner-arc-radius 30)
-               content))
-
-
-(defn focused [content]
-  (layouts/box 5
-               (visuals/rectangle-2 :fill-color [220 220 255 255]
-;;                                    :draw-color [200 200 200 255]
-;;                                    :line-width 4
-                                    :corner-arc-radius 30)
-               content))
-
-(defn button-mouse-event-handler [on-pressed node event]
-  (when (= :mouse-clicked (:type event))
-    (on-pressed))
-  event)
-
-(defn button [label on-pressed]
-  (assoc (layouts/box 15
-                      (visuals/rectangle-2 :fill-color [200 200 255 255]
-                                           :draw-color [100 100 200 255]
-                                           :line-width 10
-                                           :corner-arc-radius 30)
-                      (text label))
-         :mouse-event-handler [button-mouse-event-handler on-pressed]))
-
-(defn bare-text-editor [text on-change & [{:keys [validate-new-text]}]]
-  [text-area/text-area-3 {:style {:color [0 0 0 255]
-                                  :font  regular-font}
-                          :text text
-                          :on-change on-change
-                          :validate-new-text validate-new-text}])
-
-(defn text-editor [text on-text-change]
-  (box (layouts/with-minimum-size 300 nil
-         (bare-text-editor text (fn [old-state new-state]
-                                  (when (not= (:text new-state) (:text old-state))
-                                    (on-text-change (:text new-state)))
-                                  new-state)))))
-
-(defn parse-integer [string]
-  (try (Integer/parseInt string)
-       (catch Exception e
-         nil)))
-
-(defn number-editor-keyboard-event-handler [on-enter on-escape node event]
-  (when (and (= :descent (:phase event))
-             (= :enter (:key event)))
-    (on-enter)
-    nil)
-
-  (when (and (= :descent (:phase event))
-             (= :escape (:key event)))
-    (on-escape)
-    nil)
-  event)
-
-(defn number-editor [given-number _on-change!]
-  (let [state-atom (dependable-atom/atom {:number given-number
-                                          :given-number given-number})]
-    (fn [given-number on-change!]
-      (let [state @state-atom]
-        (when (not (= given-number (:given-number state)))
-          (swap! state-atom
-                 assoc
-                 :number given-number
-                 :given-number given-number))
-
-        (-> (box (layouts/with-minimum-size 80 nil
-                   (bare-text-editor (str (:number state))
-                                     (fn [old-state new-state]
-                                       (let [text-changed? (not= (:text new-state)
-                                                                 (:text old-state))
-                                             new-integer (parse-integer (:text new-state))]
-
-                                         (cond (and text-changed?
-                                                    (empty? (:text new-state)))
-                                               (do (swap! state-atom assoc :number nil)
-                                                   new-state)
-
-                                               (and text-changed?
-                                                    new-integer)
-                                               (do (swap! state-atom assoc :number new-integer)
-                                                   new-state)
-
-                                               (and text-changed?
-                                                    (not new-integer))
-                                               old-state
-
-                                               :else
-                                               new-state)))))
-                 {:fill-color (when (not (= given-number (:number state)))
-                                [240 240 255 255])})
-            (assoc :keyboard-event-handler [number-editor-keyboard-event-handler
-                                            (fn []
-                                              (if (nil? (:number state))
-                                                (swap! state-atom assoc :number given-number)
-                                                (on-change! (:number state))))
-
-                                            (fn []
-                                              (swap! state-atom assoc :number given-number))]))))))
-
-
-(defn hor [margin & children]
-  (apply layouts/horizontally-2 {:margin margin}
-         children))
-
-(defn chor [margin & children]
-  (apply layouts/horizontally-2 {:margin margin :centered true}
-         children))
-
-(defn ver [margin & children]
-  (apply layouts/vertically-2 {:margin margin}
-         children))
-
-(defn text-property-editor [on-change entity path]
-  (text-editor (or (get-in entity
-                           path)
-                   "")
-               #(on-change (assoc-in entity path %))))
-
-(defn number-property-editor [on-change entity path]
-  [number-editor
-   (or (get-in entity
-               path)
-       "")
-   #(do (prn 'number-property-editor-on-change %) ;; TODO: remove-me
-        (on-change (assoc-in entity path %)))])
-
-(defn event-view [event on-change on-remove on-continue]
-  (hor 50
-       (layouts/with-maximum-size 600 nil
-         (ver 0
-              (text-property-editor on-change event [:task-name])
-              (text-property-editor on-change event [:description])))
-       (chor 50
-             (hor 0
-                  (number-property-editor on-change event [:start-time :hour])
-                  (number-property-editor on-change event [:start-time :minute]))
-             (hor 20
-                  (button "remove" on-remove)
-                  (button "continue" on-continue)))))
-
-(defn time-now []
-  (let [now (clj-time/now)]
-    {:hour (clj-time/hour now)
-     :minute (clj-time/minute now)}))
-
-(defn day-view [day on-change]
-  (ver 50
-       (hor 0
-            (number-property-editor on-change day [:date :year])
-            (number-property-editor on-change day [:date :month])
-            (number-property-editor on-change day [:date :day]))
-       #_(text (:date (pr-str day)))
-       (for [[index event] (map-indexed vector (:events day))]
-         (event-view event
-                     (fn [new-event]
-                       (on-change (update day :events assoc index new-event)))
-                     (fn []
-                       (on-change (assoc day :events (vec (concat (take index (:events day))
-                                                                  (drop (inc index) (:events day)))))))
-                     (fn []
-                       (on-change (update day :events conj (assoc event
-                                                                  :start-time (time-now)))))))
-       (button "add"
-               (fn []
-                 (on-change (update day :events conj {:task-name ""
-                                                      :description ""
-                                                      :start-time (time-now)
-                                                      :work? true}))))
-
-       (chor 20
-             (text "end time")
-             (hor 0
-                  (number-property-editor on-change day [:end-time :hour])
-                  (number-property-editor on-change day [:end-time :minute])))))
-
-(defn day-selector-mouse-event-handler [on-change index node event]
-  (when (= :mouse-clicked (:type event))
-    (on-change index))
-  event)
-
-(defn day-selector [state on-change]
-  (let [days-with-index (for [[index day] (map-indexed vector (:days state))]
-                          (assoc day :index index))
-        days-by-year (medley/map-vals (fn [days-in-year]
-                                        (group-by (fn [day]
-                                                    (-> day :date :month))
-                                                  days-in-year))
-                                      (group-by #(-> % :date :year)
-                                                days-with-index))]
-    (ver 0
-         (for [year (sort (keys days-by-year))]
-           (ver 0
-                (text (str year) bold-font)
-                (chor 10
-                      (for [month (sort (keys (get days-by-year year)))]
-                        (chor 10
-                              (text (str month) bold-font)
-                              (chor 5
-                                    (for [day (get-in days-by-year [year month])]
-                                      (assoc (if (= (:selected-day-index state)
-                                                    (:index day))
-                                               (focused (text (str (-> day :date :day))))
-                                               (text (str (-> day :date :day))))
-                                             :mouse-event-handler [day-selector-mouse-event-handler on-change (:index day)])))))))))))
-
-(defn base-view [state-atom]
-  (let [state @state-atom]
-    (layouts/superimpose (visuals/rectangle-2 :fill-color [255 255 255 255])
-                         (layouts/with-margins 30 30 30 30
-                           (ver 40
-                                (hor 10 (button "add day"
-                                                (fn [] (swap! state-atom
-                                                              update
-                                                              :days
-                                                              conj
-                                                              (let [now (clj-time/now)]
-                                                                {:date {:year (clj-time/year now)
-                                                                        :month (clj-time/month now)
-                                                                        :day (clj-time/day now)}
-                                                                 :end-time {:hour 16, :minute 0}
-                                                                 :events
-                                                                 [{:task-name ""
-                                                                   :description ""
-                                                                   :start-time {:hour (clj-time/hour now)
-                                                                                :minute (clj-time/minute now)}
-                                                                   :work? true}]})))))
-                                (day-selector state (fn [new-day-index]
-                                                      (swap! state-atom assoc :selected-day-index new-day-index)))
-                                (day-view (get (:days state)
-                                               (:selected-day-index state))
-                                          (fn [new-day]
-                                            (swap! state-atom
-                                                   update
-                                                   :days
-                                                   (fn [days]
-                                                     (assoc days (:selected-day-index state) new-day)))))
-                                #_(text (pr-str @state-atom))
-
-                                (text (pr-str (report-day (get (:days state)
-                                                               (:selected-day-index state)))))
-                                #_(text (pr-str (report-day-2 (get (:days state)
-                                                                   (:selected-day-index state))))))))))
-
-(defn ui []
-  (let [state-atom (dependable-atom/atom {:days [sample-day
-                                                 (assoc sample-day :date {:year 2021 :month 3 :day 1})]
-                                          :selected-day-index 0})]
-    (fn []
-      @animation/state-atom ;; to refresh the view on :redraw events
-      (#'base-view state-atom))))
-
-(defonce event-channel-atom (atom nil))
-
-(defn start []
-  (reset! event-channel-atom (application/start-window #'ui :on-exit #(reset! event-channel-atom nil))))
-
-(when @event-channel-atom
-  (async/>!! @event-channel-atom
-             {:type :redraw}))

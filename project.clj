@@ -7,5 +7,6 @@
                  [flow-gl/flow-gl "1.0.0-SNAPSHOT"]
                  [metosin/jsonista "0.2.5"]
                  [clj-time "0.15.2"]
-                 [medley "1.3.0"]]
+                 [medley "1.3.0"]
+                 [dk.ative/docjure "1.14.0"]]
   :repl-options {:init-ns hour-report.core})

@@ -57,14 +57,22 @@
                                                                                                     (:minute end-time))}))))))})
 
 (deftest test-report-day
-  (is (= {"reititin" 26, "muuta" 572}
-         (report-day [{:startTime {:hour 8, :minute 30},
-                       :isWork true,
-                       :taskName "reititin"}
-                      {:startTime {:hour 8, :minute 56},
-                       :isWork false,
-                       :taskName "muuta"}]
-                     {:hour 18, :minute 28}))))
+  (is (= {:date "2022-01-31",
+          :hours {"core" {:total-minutes 71, :descriptions #{"hour-report"}}}}
+         (report-day {:date "2022-01-31",
+                      :endTime {:hour 17, :minute 41},
+                      :logLines
+                      [{:taskName2 "hour-report",
+                        :startTime {:hour 5, :minute 21},
+                        :duration {:hour 10, :minute 39},
+                        :isWork true,
+                        :taskName "core"}
+                       {:startTime {:hour 6, :minute 32},
+                        :duration {:hour 0, :minute -52},
+                        :isWork false,
+                        :taskName "muuta"}],
+                      :id "0.5228482764214277",
+                      :reportedHours {:hour 7, :minute 30}}))))
 
 (defn print-hours [hours]
   (doseq [[task {:keys [total-minutes descriptions]}] hours]
@@ -191,8 +199,9 @@
                                              (+ total-minutes
                                                 (or (:total-minutes (get hours2 task))
                                                     0))))
-                                   (update :descriptions
-                                           (partial set/union (:descriptions (get hours2 task))))))
+                                   (cond-> (:descriptions summary)
+                                     (update :descriptions
+                                             (partial set/union (:descriptions (get hours2 task)))))))
                              hours1)
          (select-keys hours2
                       (set/difference (set (keys hours2))
@@ -343,19 +352,22 @@
      :total-difference-after-compensation (hours-total difference-after-compensation)}))
 
 (deftest test-rounded-day-reports
-  (is (= {:difference-before-compensating {"work1" {:total-minutes 16}, "work2" {:total-minutes 17}},
-          :compensation {"work1" {:total-minutes -30}, "work2" {:total-minutes -30}},
-          :final-compensation 30,
-          :rounded-day-reports ({:date "2022-08-01",
-                                 :hours
-                                 {"work1" {:total-minutes 90, :descriptions #{}},
-                                  "work2" {:total-minutes 90, :descriptions #{"comment"}}}}
-                                {:date "2022-08-02",
-                                 :hours
-                                 {"work1" {:total-minutes 90, :descriptions #{}},
-                                  "work2" {:total-minutes 60, :descriptions #{}}}}),
-          :difference-after-compensation {"work1" {:total-minutes 16}, "work2" {:total-minutes -13}},
-          :total-difference-after-compensation 3}
+  (is (= '{:difference-before-compensating
+           {"work1" {:total-minutes 16}, "work2" {:total-minutes 17}},
+           :compensation
+           {"work1" {:total-minutes -30}, "work2" {:total-minutes -30}},
+           :final-compensation 30,
+           :rounded-day-reports
+           ({:date "2022-08-01",
+             :hours
+             {"work1" {:total-minutes 90, :descriptions #{}},
+              "work2" {:total-minutes 90, :descriptions #{"comment"}}}}
+            {:date "2022-08-02",
+             :hours
+             {"work1" {:total-minutes 90}, "work2" {:total-minutes 60}}}),
+           :difference-after-compensation
+           {"work1" {:total-minutes 16}, "work2" {:total-minutes -13}},
+           :total-difference-after-compensation 3}
 
          (rounded-day-reports [{:date "2022-08-01",
                                 :hours {"work1" {:total-minutes 89, :descriptions #{}},

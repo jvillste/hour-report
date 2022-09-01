@@ -87,12 +87,12 @@
   (apply medley/deep-merge (map pivot-day-report day-reports)))
 
 (deftest test-hours-by-task
-  (is (= '({:date "2022-08-01",
-            :hours {"work1" {:total-minutes 90, :descriptions #{}},
-                    "work2" {:total-minutes 90, :descriptions #{"comment"}}}}
-           {:date "2022-08-02",
-            :hours {"work1" {:total-minutes 90, :descriptions #{}},
-                    "work2" {:total-minutes 60, :descriptions #{}}}})
+  (is (= '{"work1"
+           {"2022-08-01" {:total-minutes 90, :descriptions #{}},
+            "2022-08-02" {:total-minutes 90, :descriptions #{}}},
+           "work2"
+           {"2022-08-01" {:total-minutes 90, :descriptions #{"comment"}},
+            "2022-08-02" {:total-minutes 60, :descriptions #{}}}}
          (hours-by-task '({:date "2022-08-01",
                            :hours {"work1" {:total-minutes 90, :descriptions #{}},
                                    "work2" {:total-minutes 90, :descriptions #{"comment"}}}}

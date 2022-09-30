@@ -199,7 +199,8 @@
                                              (+ total-minutes
                                                 (or (:total-minutes (get hours2 task))
                                                     0))))
-                                   (cond-> (:descriptions summary)
+                                   (cond-> (or (:descriptions summary)
+                                               (:descriptions (get hours2 task)))
                                      (update :descriptions
                                              (partial set/union (:descriptions (get hours2 task)))))))
                              hours1)
@@ -214,6 +215,18 @@
   (is (= {"work1" {:total-minutes 2020, :descriptions #{"foo" "bar"}}}
          (hours-sum {"work1" {:total-minutes 1020, :descriptions #{"foo"}}}
                     {"work1" {:total-minutes 1000, :descriptions #{"bar"}}})))
+
+  (is (= {"work1" {:total-minutes 2020, :descriptions #{"bar"}}}
+         (hours-sum {"work1" {:total-minutes 1020}}
+                    {"work1" {:total-minutes 1000, :descriptions #{"bar"}}})))
+
+  (is (= {"work1" {:total-minutes 2020, :descriptions #{"bar"}}}
+         (hours-sum {"work1" {:total-minutes 1020 :descriptions #{"bar"}}}
+                    {"work1" {:total-minutes 1000}})))
+
+  (is (= {"work1" {:total-minutes 2020}}
+         (hours-sum {"work1" {:total-minutes 1020}}
+                    {"work1" {:total-minutes 1000}})))
 
   (is (= {"work1" {:total-minutes 20, :descriptions #{}}}
          (hours-sum {"work1" {:total-minutes 1020, :descriptions #{}}}
@@ -294,7 +307,7 @@
 (deftest test-compensate
   (is (= '({:date "2022-07-31", :hours {"work0" {:total-minutes 130}}}
            {:date "2022-08-01", :hours {"work1" {:total-minutes 30}}}
-           {:date "2022-08-02", :hours {"work1" {:total-minutes 30}}})
+           {:date "2022-08-02", :hours {"work1" {:total-minutes 30, :descriptions #{"description"}}}})
          (compensate "work1"
                      -100
                      [{:date "2022-07-31"
@@ -302,7 +315,8 @@
                       {:date "2022-08-01"
                        :hours {"work1" {:total-minutes 30}}}
                       {:date "2022-08-02"
-                       :hours {"work1" {:total-minutes 130}}}]))))
+                       :hours {"work1" {:total-minutes 130
+                                        :descriptions #{"description"}}}}]))))
 
 (defn day-reports [days date-prefix]
   (->> days
@@ -364,7 +378,8 @@
               "work2" {:total-minutes 90, :descriptions #{"comment"}}}}
             {:date "2022-08-02",
              :hours
-             {"work1" {:total-minutes 90}, "work2" {:total-minutes 60}}}),
+             {"work1" {:total-minutes 90 :descriptions #{}}
+              "work2" {:total-minutes 60 :descriptions #{}}}}),
            :difference-after-compensation
            {"work1" {:total-minutes 16}, "work2" {:total-minutes -13}},
            :total-difference-after-compensation 3}

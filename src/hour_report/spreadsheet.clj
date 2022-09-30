@@ -64,7 +64,7 @@
                                             60))
                   (let [comments (sort (remove empty? (:descriptions entry)))]
                     (when (not (empty? comments))
-;                      (println "adding coment " (first (read-row row)) day (string/join ", " comments))
+;;                      (println "adding coment " (first (read-row row)) day (string/join ", " comments))
                       (spreadsheet/set-cell-comment! cell
                                                      (string/join ", " comments)
                                                      :width 8))))))))))

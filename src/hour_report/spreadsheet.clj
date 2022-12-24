@@ -38,10 +38,13 @@
                                        mapped-tasks)
         unavailable-taks (set/difference (set (map (set/map-invert task-mapping) tasks-with-hours))
                                          available-tasks)]
-    (assert (every? #{1}
-                    (vals (frequencies (remove nil? (map (comp first read-row)
-                                                         (spreadsheet/row-seq sheet))))))
-            "Available tasks are not unique")
+    (let [available-task-frequencies (frequencies (remove nil? (map (comp first read-row)
+                                                                    (spreadsheet/row-seq sheet))))]
+      (assert (every? #{1}
+                      (vals available-task-frequencies))
+              (str "Available tasks are not unique. Non unique are"
+                   (keys (medley/filter-vals #(< 1 %)
+                                             available-task-frequencies)))))
 
     (assert (empty? unmapped-tasks)
             (str "unmapped tasks: " (string/join ", " (for [unmapped-task unmapped-tasks]

@@ -18,14 +18,18 @@
 
 (defn day-from-date [date]
   (Integer/parseInt (subs date
-                          8)))
+                          8
+                          10)))
 
 (deftest test-day-from-date
   (is (= 1
          (day-from-date "2022-08-01")))
 
   (is (= 9
-         (day-from-date "2022-08-09"))))
+         (day-from-date "2022-08-09")))
+
+  (is (= 9
+         (day-from-date "2022-08-09T05:07:36.232Z"))))
 
 (defn- enter-hours [input-stream-or-file-name task-mapping hours-by-task]
   (let [workbook (spreadsheet/load-workbook input-stream-or-file-name)

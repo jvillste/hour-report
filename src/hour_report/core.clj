@@ -336,6 +336,8 @@
                                  "work2" {:total-minutes 20}}))))
 
 (defn rounded-day-reports [day-reports]
+  (assert (not (empty? day-reports)))
+
   (let [rounded-day-reports (map round-day-hours
                                  day-reports)
         unrounded-totals (combine-days day-reports)

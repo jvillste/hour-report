@@ -295,14 +295,15 @@
 (defn compensate [task minutes day-reports]
   (let [day-reports-by-date (medley/index-by :date day-reports)
         day-report-for-compensation (day-report-for-compensation task minutes day-reports)]
-    (assert (not (nil? day-report-for-compensation))
-            (str "could not find a day to compensate " minutes " for " task))
-    (println "compensating " minutes " minutes for " task " on " (:date day-report-for-compensation))
-    (vals (assoc day-reports-by-date
-                 (:date day-report-for-compensation)
-                 (update day-report-for-compensation
-                         :hours
-                         (partial hours-sum {task {:total-minutes minutes}}))))))
+    (if (nil? day-report-for-compensation)
+      (do (println (str "could not find a day to compensate " minutes " for " task))
+          day-reports)
+      (do (println "compensating " minutes " minutes for " task " on " (:date day-report-for-compensation))
+          (vals (assoc day-reports-by-date
+                       (:date day-report-for-compensation)
+                       (update day-report-for-compensation
+                               :hours
+                               (partial hours-sum {task {:total-minutes minutes}}))))))))
 
 (deftest test-compensate
   (is (= '({:date "2022-07-31", :hours {"work0" {:total-minutes 130}}}
@@ -316,6 +317,15 @@
                        :hours {"work1" {:total-minutes 30}}}
                       {:date "2022-08-02"
                        :hours {"work1" {:total-minutes 130
+                                        :descriptions #{"description"}}}}])))
+
+  (is (= [{:date "2022-08-02",
+           :hours
+           {"work1" {:total-minutes 90, :descriptions #{"description"}}}}]
+         (compensate "work1"
+                     -100
+                     [{:date "2022-08-02"
+                       :hours {"work1" {:total-minutes 90
                                         :descriptions #{"description"}}}}]))))
 
 (defn day-reports [days date-prefix]

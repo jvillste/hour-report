@@ -122,6 +122,16 @@
        :days
        vals))
 
+(defn print-totals! [days date-prefix]
+  (->> days
+       (sort-by :date)
+       (map report-day)
+       (filter (fn [day] (.startsWith (:date day)
+                                      date-prefix)))
+       (combine-days)
+       (medley/map-vals (fn [task] (dissoc task :descriptions)))
+       (print-hours)))
+
 (defn print-report! [days date-prefix]
   (->> days
        (sort-by :date)
@@ -132,14 +142,7 @@
 
   (println "Totals:")
 
-  (->> days
-       (sort-by :date)
-       (map report-day)
-       (filter (fn [day] (.startsWith (:date day)
-                                      date-prefix)))
-       (combine-days)
-       (medley/map-vals (fn [task] (dissoc task :descriptions)))
-       (print-hours)))
+  (print-totals! days date-prefix))
 
 
 ;;;;;;;;  excel
